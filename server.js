@@ -29,14 +29,30 @@ const { chromium } = require('playwright');
     res.json({ urls });
   });
 
-  // 2. 企業ごとの求人一覧取得
+  // 2. 企業ごとの求人一覧取得（除外フィルター付き）
   app.post('/jobs', async (req, res) => {
     const { companyUrl } = req.body;
     await page.goto(companyUrl, { waitUntil: 'networkidle' });
-    await page.waitForSelector('a[href*="/jobs/"]', { timeout: 10000 });
-    const jobUrls = await page.$$eval('a[href*="/jobs/"]', els =>
-      Array.from(new Set(els.map(a => a.href)))
+
+    // すべての求人リンク要素を取得
+    const jobEntries = await page.$$eval('a[href*="/jobs/"]', els =>
+      els.map(a => ({
+        url: a.href,
+        text: a.textContent || ''
+      }))
     );
+
+    // 除外条件
+    const excludeWords = ['名古屋', '北海道', '沖縄', '福岡', '広島'];
+    const filtered = jobEntries.filter(({ text }) => {
+      const containsKumikomi = text.includes('組み込み');
+      const containsExcludedArea = excludeWords.some(area => text.includes(area));
+      // 組み込み + 地方 → 除外
+      return !(containsKumikomi && containsExcludedArea);
+    });
+
+    // URLだけ返す
+    const jobUrls = Array.from(new Set(filtered.map(item => item.url)));
     res.json({ jobUrls });
   });
 
