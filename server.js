@@ -56,12 +56,22 @@ const { chromium } = require('playwright');
 
 
   // 求人詳細ページ取得
-  app.post('/scrape', async (req, res) => {
+    app.post('/scrape', async (req, res) => {
     const { url } = req.body;
     await page.goto(url, { waitUntil: 'networkidle' });
-    const html = await page.$eval('article', el => el.innerHTML).catch(() => '');
-    res.json({ url, html });
-  });
+
+    // 明示的にセレクタを待機
+    try {
+        await page.waitForSelector('article', { timeout: 5000 });
+        const html = await page.$eval('article', el => el.innerHTML);
+        res.json({ url, html });
+    } catch (e) {
+        console.warn(`❗ article not found or timeout at: ${url}`);
+        const fallback = await page.content(); // fallbackで全体を取得
+        res.json({ url, html: fallback });
+    }
+    });
+
 
   const port = process.env.PORT || 3000;
   app.listen(port, () => console.log(`Server listening on port ${port}`));
