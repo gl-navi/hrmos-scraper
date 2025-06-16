@@ -1,19 +1,21 @@
-FROM node:18-alpine
+FROM node:18-slim
+WORKDIR /app
 
-# Create app directory
-WORKDIR /usr/src/app
+# Playwright 依存ライブラリ
+RUN apt-get update && \
+    apt-get install -y \
+      libnss3 libatk-bridge2.0-0 libx11-xcb1 libxcomposite1 \
+      libxdamage1 libxrandr2 libgbm1 libasound2 libxss1 \
+      libgtk-3-0 libpangocairo-1.0-0 && \
+    rm -rf /var/lib/apt/lists/*
 
-# Install dependencies
-COPY package.json package-lock.json ./
+COPY package*.json ./
 RUN npm ci
-# Install the Playwright browsers needed by @cloudflare/playwright-mcp
-RUN npx playwright install
 
-# Copy source
-COPY src/ ./src/
+# Playwright ブラウザバイナリのインストール
+RUN npx playwright install --with-deps
 
-# Expose the port (MCP uses WebSockets over HTTP, default 8787 internally)
-EXPOSE 8787
+COPY . .
 
-# Start the MCP server
-CMD ["node", "src/index.js"]
+ENV PORT=3000
+CMD ["node", "server.js"]
