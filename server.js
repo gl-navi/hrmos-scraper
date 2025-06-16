@@ -39,12 +39,21 @@ const { chromium } = require('playwright');
 
 
   // 企業ごとの求人一覧取得
-  app.post('/jobs', async (req, res) => {
+    app.post('/jobs', async (req, res) => {
     const { companyUrl } = req.body;
     await page.goto(companyUrl, { waitUntil: 'networkidle' });
-    const jobUrls = await page.$$eval('.job-list-item a', els => els.map(a => a.href));
+
+    // Angular描画を明示的に待つ（例: 求人タイトルリンクが出現するまで）
+    await page.waitForSelector('a[href*="/jobs/"]', { timeout: 10000 });
+
+    const jobUrls = await page.$$eval('a[href*="/jobs/"]', els =>
+        Array.from(new Set(els.map(a => a.href)))
+    );
+
+    console.log("Job URLs extracted:", jobUrls);
     res.json({ jobUrls });
-  });
+    });
+
 
   // 求人詳細ページ取得
   app.post('/scrape', async (req, res) => {
