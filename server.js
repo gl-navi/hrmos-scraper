@@ -3,7 +3,6 @@ const bodyParser = require('body-parser');
 const { chromium } = require('playwright');
 
 (async () => {
-  // ブラウザ＆コンテキスト起動
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -20,59 +19,52 @@ const { chromium } = require('playwright');
   const app = express();
   app.use(bodyParser.json());
 
-  // 企業一覧取得
-    app.get('/companies', async (_, res) => {
-    console.log('Navigating to HRMOS corporates list...');
+  // 1. 企業一覧取得
+  app.get('/companies', async (_, res) => {
     await page.goto('https://hrmos.co/agent/corporates', { waitUntil: 'networkidle' });
-
-    // Angular が描画するリンクを待機（最大10秒）
     await page.waitForSelector('a[href*="/jobs"]', { timeout: 10000 });
-
-    // リンクを取得（重複除去）
     const urls = await page.$$eval('a[href*="/jobs"]', els =>
-        Array.from(new Set(els.map(a => a.href)))
+      Array.from(new Set(els.map(a => a.href)))
     );
-
-    console.log("Extracted company job URLs:", urls);
     res.json({ urls });
-    });
+  });
 
-
-  // 企業ごとの求人一覧取得
-    app.post('/jobs', async (req, res) => {
+  // 2. 企業ごとの求人一覧取得
+  app.post('/jobs', async (req, res) => {
     const { companyUrl } = req.body;
     await page.goto(companyUrl, { waitUntil: 'networkidle' });
-
-    // Angular描画を明示的に待つ（例: 求人タイトルリンクが出現するまで）
     await page.waitForSelector('a[href*="/jobs/"]', { timeout: 10000 });
-
     const jobUrls = await page.$$eval('a[href*="/jobs/"]', els =>
-        Array.from(new Set(els.map(a => a.href)))
+      Array.from(new Set(els.map(a => a.href)))
     );
-
-    console.log("Job URLs extracted:", jobUrls);
     res.json({ jobUrls });
-    });
+  });
 
+  // 3. 求人ごとの詳細ページURL取得（/detail を含むリンク）
+  app.post('/job-details', async (req, res) => {
+    const { jobUrl } = req.body;
+    await page.goto(jobUrl, { waitUntil: 'networkidle' });
+    await page.waitForSelector('a[href*="/detail"]', { timeout: 10000 });
+    const detailUrls = await page.$$eval('a[href*="/detail"]', els =>
+      Array.from(new Set(els.map(a => a.href)))
+    );
+    res.json({ detailUrls });
+  });
 
-  // 求人詳細ページ取得
-    app.post('/scrape', async (req, res) => {
+  // 4. 求人詳細ページHTML取得
+  app.post('/scrape', async (req, res) => {
     const { url } = req.body;
     await page.goto(url, { waitUntil: 'networkidle' });
-
-    // 明示的にセレクタを待機
     try {
-        await page.waitForSelector('article', { timeout: 5000 });
-        const html = await page.$eval('article', el => el.innerHTML);
-        res.json({ url, html });
+      await page.waitForSelector('article', { timeout: 5000 });
+      const html = await page.$eval('article', el => el.innerHTML);
+      res.json({ url, html });
     } catch (e) {
-        console.warn(`❗ article not found or timeout at: ${url}`);
-        const fallback = await page.content(); // fallbackで全体を取得
-        res.json({ url, html: fallback });
+      const fallback = await page.content();
+      res.json({ url, html: fallback });
     }
-    });
-
+  });
 
   const port = process.env.PORT || 3000;
-  app.listen(port, () => console.log(`Server listening on port ${port}`));
+  app.listen(port, () => console.log(`✅ Server running on port ${port}`));
 })();
