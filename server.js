@@ -21,10 +21,22 @@ const { chromium } = require('playwright');
   app.use(bodyParser.json());
 
   // 企業一覧取得
-  app.get('/companies', async (_, res) => {
-    const urls = await page.$$eval('.corporate-list-item a', els => els.map(a => a.href));
+    app.get('/companies', async (_, res) => {
+    console.log('Navigating to HRMOS corporates list...');
+    await page.goto('https://hrmos.co/agent/corporates', { waitUntil: 'networkidle' });
+
+    // Angular が描画するリンクを待機（最大10秒）
+    await page.waitForSelector('a[href*="/jobs"]', { timeout: 10000 });
+
+    // リンクを取得（重複除去）
+    const urls = await page.$$eval('a[href*="/jobs"]', els =>
+        Array.from(new Set(els.map(a => a.href)))
+    );
+
+    console.log("Extracted company job URLs:", urls);
     res.json({ urls });
-  });
+    });
+
 
   // 企業ごとの求人一覧取得
   app.post('/jobs', async (req, res) => {
