@@ -159,6 +159,7 @@ async function scrapeDetail(page, detailUrl) {
     }
 
     /* === 3. その他フィールド ========================================= */
+    const companyName = extractByLabels(['会社名']);
     const salaryBlock   = extractByLabels(['給与','想定年収'], true);
     const salaryFirst   = salaryBlock.split(/\r?\n/)[0].trim();
     const workTimeBlock = extractByLabels(['勤務時間','勤務時間・曜日'], true);
@@ -168,6 +169,7 @@ async function scrapeDetail(page, detailUrl) {
 
     /* === 4. 結果オブジェクト ======================================== */
     return {
+      companyName,
       detailUrl,
       JPS_applied_job_title          : extractByLabels(['求人タイトル']),
       JPS_occupation_category        : extractByLabels(['職種','募集ポジション']),
@@ -252,14 +254,18 @@ app.post('/scrape', async (req, res) => {
         if (stopAt === 'jobs') writeObj(row);
       }
     }
-    if (stopAt === 'jobs') { res.end(']'); return; }
+    if (stopAt === 'jobs') {
+      res.end(']');
+      return;
+    }
 
     /* 詳細取得 */
     for (const j of flatJobs) {
       const dUrls = await fetchDetailUrls(page, j.url);
       for (const dUrl of dUrls) {
         const dInfo = await scrapeDetail(page, dUrl);
-        writeObj({ ...j, ...dInfo });
+        const { companyName: _, ...rest } = dInfo;
+        writeObj({ ...j, ...rest });
       }
     }
     res.end(']');
