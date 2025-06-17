@@ -29,7 +29,7 @@ app.post('/scrape', async (req, res) => {
     await page.fill('input[name="password"]', password);
     await Promise.all([
       page.click('button[type="submit"]'),
-      page.waitForURL('https://hrmos.co/agent/corporates')
+      page.waitForNavigation({ waitUntil: 'networkidle' })
     ]);
 
     // 処理モードに応じて分岐
@@ -69,7 +69,7 @@ app.post('/scrape', async (req, res) => {
         return res.json({ status: 'skipped', reason: 'Already scraped', url });
       }
 
-      await page.goto(url, { waitUntil: 'networkidle' });
+      await page.goto(url, { waitUntil: 'load' }); // 失敗しても止まらないように変更
       const jobData = await page.evaluate(() => {
         const getText = selector => {
           const el = document.querySelector(selector);
