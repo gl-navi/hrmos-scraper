@@ -141,7 +141,7 @@ async function scrapeDetail(page, detailUrl) {
         );
       }
     }
-
+　
     /* === 2. 応募資格 ================================================= */
     let recruitmentDetails = '';
     const heading = Array.from(document.querySelectorAll('h1,h2,h3,strong,b'))
