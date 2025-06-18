@@ -1,25 +1,13 @@
 // hrmos.js
-
-// 環境変数を読み込む（.envファイルから）
 require('dotenv').config();
-
-// Expressアプリケーションをインポート
 const express = require('express');
-
-// ログインページURLと企業トップページURLを定義
 const LOGIN_URL   = 'https://hrmos.co/agent/login';
 const CORP_TOP    = 'https://hrmos.co/agent/corporates';
-
-// 除外したい地域ワード（ローカル求人を省くため）
 const LOCAL_WORDS = ['名古屋','愛知','北海道','沖縄','福岡','広島'];
 
-// routerとして外部から利用できるようにエクスポート（browserStateはPlaywrightの状態管理用）
 module.exports = (browserState) => {
   const router = express.Router();
 
-  // --------------------
-  // 1. ログイン処理
-  // --------------------
   async function login(inputEmail, inputPassword) {
     const email = inputEmail || process.env.HRMOS_EMAIL;
     const password = inputPassword || process.env.HRMOS_PASSWORD;
@@ -38,16 +26,13 @@ module.exports = (browserState) => {
     return { page, context };
   }
 
-  // --------------------
-  // 2. 企業一覧の取得
-  // --------------------
   async function fetchCompanies(page) {
     await page.goto(CORP_TOP, { waitUntil: 'networkidle' });
     return await page.$$eval('a[href*="/jobs"]', els => {
       const seen = new Set();
       return els.map(a => {
         const href = a.href;
-        if (seen.has(href)) return null; // 重複除外
+        if (seen.has(href)) return null;
         seen.add(href);
         const raw = (a.querySelector('.normal')?.innerText || a.textContent).trim();
         return { companyName: raw.split(/Invited/i)[0].trim(), companyJobsUrl: href };
@@ -55,11 +40,9 @@ module.exports = (browserState) => {
     });
   }
 
-  // --------------------
-  // 3. 各企業の求人一覧を取得
-  // --------------------
   async function fetchJobItems(page, companyJobsUrl) {
     await page.goto(companyJobsUrl, { waitUntil: 'networkidle' });
+    await page.waitForSelector('a[href*="/jobs/"]', { timeout: 5000 });
     return await page.$$eval('a[href*="/jobs/"]', (els, LOCAL_WORDS) => {
       const items = [];
       for (const a of els) {
@@ -74,23 +57,16 @@ module.exports = (browserState) => {
     }, LOCAL_WORDS);
   }
 
-  // --------------------
-  // 4. 求人の詳細URLを取得
-  // --------------------
   async function fetchDetailUrls(page, jobUrl) {
     await page.goto(jobUrl, { waitUntil: 'networkidle' });
     return await page.$$eval('a[href*="/detail"]', els => Array.from(new Set(els.map(a => a.href))));
   }
 
-  // --------------------
-  // 5. 詳細ページの情報を抽出
-  // --------------------
   async function scrapeDetail(page, detailUrl) {
     await page.goto(detailUrl, { waitUntil: 'networkidle' });
     await page.waitForSelector('h1,h2,dt', { timeout: 8000 });
 
     return await page.evaluate(detailUrl => {
-      // 表形式・セクション形式を整形する補助関数
       function getFormattedText(el) {
         const clone = el.cloneNode(true);
         clone.querySelectorAll('img,picture,svg').forEach(n => n.remove());
@@ -99,7 +75,6 @@ module.exports = (browserState) => {
         return clone.innerText.replace(/\n{3,}/g, '\n\n').trim();
       }
 
-      // 見出しやラベルで該当要素を検索
       function extractByLabels(labels, joinAll = false) {
         const isMatch = txt => labels.some(l => txt && txt.trim().includes(l));
         const results = [];
@@ -119,7 +94,6 @@ module.exports = (browserState) => {
         return joinAll ? results.join('\n') : (results[0] || '');
       }
 
-      // 詳細情報ブロック
       let postingDetails = '';
       const tbodies = Array.from(document.querySelectorAll('tbody')).map(tb => getFormattedText(tb)).filter(t => t.length);
       if (tbodies.length) postingDetails = tbodies.join('\n\n');
@@ -128,7 +102,6 @@ module.exports = (browserState) => {
         if (bodyBlocks.length) postingDetails = getFormattedText(bodyBlocks.sort((a, b) => b.innerText.length - a.innerText.length)[0]);
       }
 
-      // 応募資格など
       let recruitmentDetails = '';
       const heading = Array.from(document.querySelectorAll('h1,h2,h3,strong,b')).find(h => /応募資格/.test(h.innerText));
       if (heading) {
@@ -142,7 +115,6 @@ module.exports = (browserState) => {
         recruitmentDetails = parts.join('\n');
       }
 
-      // ラベルごとの情報抽出
       const companyName = extractByLabels(['会社名']);
       const salaryBlock = extractByLabels(['給与','想定年収'], true);
       const salaryFirst = salaryBlock.split(/\r?\n/)[0].trim();
@@ -151,7 +123,6 @@ module.exports = (browserState) => {
       const workingCondMatch = workCondKeys.find(k => salaryBlock.includes(k) || workTimeBlock.includes(k)) || '';
       const idealProfile = extractByLabels(['求める人物像','歓迎する経歴','応募資格（WANT）'], true);
 
-      // 出力JSON構造
       return {
         companyName,
         detailUrl,
@@ -174,9 +145,6 @@ module.exports = (browserState) => {
     }, detailUrl);
   }
 
-  // --------------------
-  // 6. POSTエンドポイント（外部から呼び出し）
-  // --------------------
   router.post('/', async (req, res) => {
     const { email, password, url, stopAt = 'details' } = req.body;
     if (!url) return res.status(400).end('url 必須');
