@@ -23,4 +23,4 @@ app.use(bodyParser.json());
 // 各サイトのルータを登録
 app.use('/hrmos', hrmosRouter(browserState));
 
-app.listen(PORT, () => console.log(`✅ Server listening on http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`✅ Server listening on https://hrmos-scraper.onrender.com:${PORT}`));
