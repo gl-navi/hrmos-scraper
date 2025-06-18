@@ -18,4 +18,4 @@ RUN npx playwright install --with-deps
 COPY . .
 
 ENV PORT=3000
-CMD ["node", "server.js"]
+CMD ["node", "main.js"]
