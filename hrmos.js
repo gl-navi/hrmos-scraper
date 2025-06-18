@@ -42,7 +42,6 @@ module.exports = (browserState) => {
 
   async function fetchJobItems(page, companyJobsUrl) {
     await page.goto(companyJobsUrl, { waitUntil: 'networkidle' });
-    await page.waitForSelector('a[href*="/jobs/"]', { timeout: 5000 });
     return await page.$$eval('a[href*="/jobs/"]', (els, LOCAL_WORDS) => {
       const items = [];
       for (const a of els) {
@@ -66,7 +65,7 @@ module.exports = (browserState) => {
     await page.goto(detailUrl, { waitUntil: 'networkidle' });
     await page.waitForSelector('h1,h2,dt', { timeout: 8000 });
 
-    return await page.evaluate(detailUrl => {
+    return await page.evaluate((detailUrl) => {
       function getFormattedText(el) {
         const clone = el.cloneNode(true);
         clone.querySelectorAll('img,picture,svg').forEach(n => n.remove());
