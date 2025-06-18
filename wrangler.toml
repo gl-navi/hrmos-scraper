@@ -1,9 +1,0 @@
-name          = "playwright-mcp-example"
-type          = "webpack"        # ← bundle via webpack (resolves import/require)
-workers_dev   = true
-
-compatibility_date  = "2025-06-16"
-compatibility_flags = ["nodejs_compat"]
-
-[browser]
-binding = "BROWSER"
