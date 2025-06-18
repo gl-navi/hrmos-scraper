@@ -208,6 +208,5 @@ module.exports = (browserState) => {
       if (context) await context.close();
     }
   });
-
   return router;
 };
