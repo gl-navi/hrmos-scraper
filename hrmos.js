@@ -1,4 +1,5 @@
 // hrmos.js
+require('dotenv').config();
 const express = require('express');
 
 const LOGIN_URL   = 'https://hrmos.co/agent/login';
@@ -8,7 +9,11 @@ const LOCAL_WORDS = ['名古屋','愛知','北海道','沖縄','福岡','広島'
 module.exports = (browserState) => {
   const router = express.Router();
 
-  async function login(email, password) {
+  async function login(inputEmail, inputPassword) {
+    const email = inputEmail || process.env.HRMOS_EMAIL;
+    const password = inputPassword || process.env.HRMOS_PASSWORD;
+    if (!email || !password) throw new Error('email/passwordが指定されていません');
+
     const browser = await browserState.ensureBrowser();
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -21,6 +26,8 @@ module.exports = (browserState) => {
     ]);
     return { page, context };
   }
+
+  // --- 以下の関数（fetchCompanies, fetchJobItems, fetchDetailUrls, scrapeDetail）省略なしでそのまま ---
 
   async function fetchCompanies(page) {
     await page.goto(CORP_TOP, { waitUntil: 'networkidle' });
@@ -141,7 +148,7 @@ module.exports = (browserState) => {
 
   router.post('/', async (req, res) => {
     const { email, password, url, stopAt = 'details' } = req.body;
-    if (!email || !password || !url) return res.status(400).end('email,password,url 必須');
+    if (!url) return res.status(400).end('url 必須');
     if (!['companies','jobs','details'].includes(stopAt)) return res.status(400).end('stopAt is invalid');
 
     const { page, context } = await login(email, password);
