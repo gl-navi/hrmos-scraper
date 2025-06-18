@@ -198,7 +198,6 @@ module.exports = (browserState) => {
           writeObj({ ...j, ...rest });
         }
       }
-
       res.end(']');
     } catch (e) {
       console.error(e);
