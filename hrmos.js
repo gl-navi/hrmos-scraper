@@ -1,8 +1,10 @@
-// hrmos.js
+// hrmos.js - Playwright + Cheerio version (with full item extraction)
 require('dotenv').config();
 const express = require('express');
-const LOGIN_URL   = 'https://hrmos.co/agent/login';
-const CORP_TOP    = 'https://hrmos.co/agent/corporates';
+const cheerio = require('cheerio');
+
+const LOGIN_URL = 'https://hrmos.co/agent/login';
+const CORP_TOP = 'https://hrmos.co/agent/corporates';
 const LOCAL_WORDS = ['名古屋','愛知','北海道','沖縄','福岡','広島'];
 
 module.exports = (browserState) => {
@@ -46,7 +48,7 @@ module.exports = (browserState) => {
       const items = [];
       for (const a of els) {
         const raw = (a.querySelector('.normal')?.innerText || a.textContent).trim();
-        const t   = raw.replace(/@\{[^}]+\}/g, '').split(/Invited/i)[0].trim();
+        const t = raw.replace(/@\{[^}]+\}/g, '').split(/Invited/i)[0].trim();
         if (!t) continue;
         if (t.includes('組み込み') || LOCAL_WORDS.some(l => t.includes(l))) continue;
         items.push({ title: t, url: a.href });
@@ -63,85 +65,78 @@ module.exports = (browserState) => {
 
   async function scrapeDetail(page, detailUrl) {
     await page.goto(detailUrl, { waitUntil: 'networkidle' });
-    await page.waitForSelector('h1,h2,dt', { timeout: 8000 });
+    const html = await page.content();
+    const $ = cheerio.load(html);
 
-    return await page.evaluate((detailUrl) => {
-      function getFormattedText(el) {
-        const clone = el.cloneNode(true);
-        clone.querySelectorAll('img,picture,svg').forEach(n => n.remove());
-        clone.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
-        clone.querySelectorAll('li').forEach(li => li.insertAdjacentText('afterbegin', '• '));
-        return clone.innerText.replace(/\n{3,}/g, '\n\n').trim();
-      }
+    function getText(el) {
+      return $(el).text().replace(/\n{3,}/g, '\n\n').trim();
+    }
 
-      function extractByLabels(labels, joinAll = false) {
-        const isMatch = txt => labels.some(l => txt && txt.trim().includes(l));
-        const results = [];
-        for (const el of document.querySelectorAll('th,dt')) {
-          if (isMatch(el.innerText)) {
-            const val = el.nextElementSibling || el.parentElement.querySelector('td,dd');
-            if (val) results.push(getFormattedText(val));
-          }
+    function extractByLabels(labels, joinAll = false) {
+      const results = [];
+      for (const label of labels) {
+        const th = $(`th:contains("${label}"), dt:contains("${label}")`).first();
+        if (th.length) {
+          const val = th.next('td, dd');
+          if (val.length) results.push(getText(val));
         }
-        for (const h of document.querySelectorAll('h1,h2,h3,strong,b')) {
-          if (isMatch(h.innerText)) {
-            let n = h.nextElementSibling;
-            while (n && n.innerText.trim() === '') n = n.nextElementSibling;
-            if (n) results.push(getFormattedText(n));
-          }
+        const header = $(`h1:contains("${label}"), h2:contains("${label}"), h3:contains("${label}")`).first();
+        if (header.length) {
+          let next = header.next();
+          while (next && next.text().trim() === '') next = next.next();
+          if (next) results.push(getText(next));
         }
-        return joinAll ? results.join('\n') : (results[0] || '');
       }
+      return joinAll ? results.join('\n') : (results[0] || '');
+    }
 
-      let postingDetails = '';
-      const tbodies = Array.from(document.querySelectorAll('tbody')).map(tb => getFormattedText(tb)).filter(t => t.length);
-      if (tbodies.length) postingDetails = tbodies.join('\n\n');
-      else {
-        const bodyBlocks = Array.from(document.querySelectorAll('section, div, article')).filter(e => (e.innerText || '').length > 200);
-        if (bodyBlocks.length) postingDetails = getFormattedText(bodyBlocks.sort((a, b) => b.innerText.length - a.innerText.length)[0]);
+    const companyName = extractByLabels(['会社名']);
+    const salaryBlock = extractByLabels(['給与', '想定年収'], true);
+    const salaryFirst = salaryBlock.split(/\r?\n/)[0].trim();
+    const workTimeBlock = extractByLabels(['勤務時間', '勤務時間・曜日'], true);
+    const workCondKeys = ['固定時間制','変動勤務時間制','フレックスタイム制','裁量勤務制'];
+    const workingCondMatch = workCondKeys.find(k => salaryBlock.includes(k) || workTimeBlock.includes(k)) || '';
+    const idealProfile = extractByLabels(['求める人物像','歓迎する経歴','応募資格（WANT）'], true);
+
+    let recruitmentDetails = '';
+    const h = $('h1,h2,h3,strong,b').filter((_, el) => /応募資格/.test($(el).text())).first();
+    if (h.length) {
+      const parts = [];
+      let n = h.next();
+      while (n.length && !['H1','H2','H3','STRONG','B'].includes(n[0].tagName)) {
+        if (n.text().trim()) parts.push(getText(n));
+        n = n.next();
       }
+      recruitmentDetails = parts.join('\n');
+    }
 
-      let recruitmentDetails = '';
-      const heading = Array.from(document.querySelectorAll('h1,h2,h3,strong,b')).find(h => /応募資格/.test(h.innerText));
-      if (heading) {
-        const parts = [];
-        const stopTags = new Set(['H1','H2','H3','STRONG','B']);
-        let n = heading.nextElementSibling;
-        while (n && !stopTags.has(n.tagName)) {
-          if ((n.innerText || '').trim()) parts.push(getFormattedText(n));
-          n = n.nextElementSibling;
-        }
-        recruitmentDetails = parts.join('\n');
-      }
+    let postingDetails = '';
+    const tbodies = $('tbody').map((_, el) => getText(el)).get().filter(t => t.length);
+    if (tbodies.length) postingDetails = tbodies.join('\n\n');
+    else {
+      const block = $('section, div, article').filter((_, el) => $(el).text().length > 200).first();
+      if (block.length) postingDetails = getText(block);
+    }
 
-      const companyName = extractByLabels(['会社名']);
-      const salaryBlock = extractByLabels(['給与','想定年収'], true);
-      const salaryFirst = salaryBlock.split(/\r?\n/)[0].trim();
-      const workTimeBlock = extractByLabels(['勤務時間','勤務時間・曜日'], true);
-      const workCondKeys = ['固定時間制','変動勤務時間制','フレックスタイム制','裁量勤務制'];
-      const workingCondMatch = workCondKeys.find(k => salaryBlock.includes(k) || workTimeBlock.includes(k)) || '';
-      const idealProfile = extractByLabels(['求める人物像','歓迎する経歴','応募資格（WANT）'], true);
-
-      return {
-        companyName,
-        detailUrl,
-        JPS_applied_job_title       : extractByLabels(['求人タイトル']),
-        JPS_occupation_category     : extractByLabels(['職種','募集ポジション']),
-        JPS_position_department     : '',
-        JPS_overseas_residency_check: '',
-        JPS_display_language        : '日本語',
-        JPS_contract_type           : extractByLabels(['雇用形態']),
-        JPS_work_location           : extractByLabels(['勤務地']),
-        JPS_salary                  : salaryFirst,
-        JPS_working_conditions      : workingCondMatch,
-        JPS_work_schedule           : workTimeBlock,
-        JPS_trial_period            : '',
-        JPS_trial_period_others     : '',
-        JPS_recruitment_details     : recruitmentDetails,
-        JPS_ideal_candidate_profile : idealProfile,
-        JPS_posting_details         : postingDetails
-      };
-    }, detailUrl);
+    return {
+      companyName,
+      detailUrl,
+      JPS_applied_job_title       : extractByLabels(['求人タイトル']),
+      JPS_occupation_category     : extractByLabels(['職種','募集ポジション']),
+      JPS_position_department     : '',
+      JPS_overseas_residency_check: '',
+      JPS_display_language        : '日本語',
+      JPS_contract_type           : extractByLabels(['雇用形態']),
+      JPS_work_location           : extractByLabels(['勤務地']),
+      JPS_salary                  : salaryFirst,
+      JPS_working_conditions      : workingCondMatch,
+      JPS_work_schedule           : workTimeBlock,
+      JPS_trial_period            : '',
+      JPS_trial_period_others     : '',
+      JPS_recruitment_details     : recruitmentDetails,
+      JPS_ideal_candidate_profile : idealProfile,
+      JPS_posting_details         : postingDetails
+    };
   }
 
   router.post('/', async (req, res) => {
@@ -207,5 +202,6 @@ module.exports = (browserState) => {
       if (context) await context.close();
     }
   });
+
   return router;
 };
