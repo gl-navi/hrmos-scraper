@@ -1,0 +1,38 @@
+# Node modules (we install fresh inside container)
+node_modules
+
+# Logs
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+pnpm-debug.log
+
+# Environment files (if we want to keep secrets out of image)
+.env
+.env.local
+.env.*.local
+
+# Git files
+.git
+.gitignore
+
+# Dockerfile and docker-compose files
+Dockerfile
+docker-compose.yml
+
+# Local build output, IDE config files, temp files
+dist
+build
+.vscode
+.idea
+*.swp
+*.swo
+*.bak
+*.tmp
+
+# Playwright traces and reports if you generate them locally
+playwright-report
+playwright-traces
+
+# Any other local files you don’t want in your image
+*.log
