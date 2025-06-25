@@ -149,46 +149,74 @@ async function scrapeDetail(page, detailUrl) {
     }, detailUrl);
 }
 
-async function processScrape({ page, res, url, stopAt, fetchCompanies, fetchJobItems, fetchDetailUrls, scrapeDetail }) {
+async function processScrape({page, res, url, stopAt, fetchCompanies, fetchJobItems, fetchDetailUrls, scrapeDetail}) {
+    res.writeHead(200, {'Content-Type': 'application/json; charset=utf-8', 'Transfer-Encoding': 'chunked'});
+    res.write('[');
+    let first = true;
+    const writeObj = obj => {
+        res.write((first ? '' : ',') + JSON.stringify(obj));
+        first = false;
+    };
+
     try {
+        if (url.includes('/detail') && stopAt === 'details') {
+            writeObj(await scrapeDetail(page, url));
+            res.end(']');
+            return;
+        }
+
+        const companies = await fetchCompanies(page);
         if (stopAt === 'companies') {
-            const companies = await fetchCompanies(page);
-            return res.json({ companies });
+            companies.forEach(writeObj);
+            res.end(']');
+            return;
+        }
+
+        const target = (() => {
+            if (url.includes('/corporates') && !url.includes('/jobs')) return companies;
+            if (url.includes('/jobs/') && !url.includes('/detail')) {
+                const match = companies.find(c => c.companyJobsUrl === url);
+                return match ? [match] : [];
+            }
+            return null;
+        })();
+
+        if (!target || !target.length) {
+            res.end(']');
+            return;
+        }
+
+        const flatJobs = [];
+        for (const {companyName, companyJobsUrl} of target) {
+            const jobs = await fetchJobItems(page, companyJobsUrl);
+            for (const j of jobs) {
+                const row = {companyName, title: j.title, url: j.url};
+                flatJobs.push(row);
+                if (stopAt === 'jobs') writeObj(row);
+            }
         }
 
         if (stopAt === 'jobs') {
-            const companies = await fetchCompanies(page);
-            const jobResults = [];
-
-            for (const company of companies) {
-                const jobs = await fetchJobItems(page, company.companyJobsUrl);
-                jobResults.push({ company: company.companyName, jobs });
-            }
-
-            return res.json({ jobs: jobResults });
+            res.end(']');
+            return;
         }
 
-        if (stopAt === 'details') {
-            const companies = await fetchCompanies(page);
-            const allDetails = [];
-
-            for (const company of companies) {
-                const jobs = await fetchJobItems(page, company.companyJobsUrl);
-                for (const job of jobs) {
-                    const detailUrls = await fetchDetailUrls(page, job.url);
-                    for (const detailUrl of detailUrls) {
-                        const detail = await scrapeDetail(page, detailUrl);
-                        allDetails.push(detail);
-                    }
-                }
+        for (const j of flatJobs) {
+            const dUrls = await fetchDetailUrls(page, j.url);
+            for (const dUrl of dUrls) {
+                const dInfo = await scrapeDetail(page, dUrl);
+                const {companyName: _, ...rest} = dInfo;
+                writeObj({...j, ...rest});
             }
-
-            return res.json({ details: allDetails });
         }
 
-    } catch (error) {
-        console.error('Error during scraping:', error);
-        return res.status(500).json({ error: error.message });
+        res.end(']');
+    } catch (err) {
+        console.error(err);
+        res.write((first ? '' : ',') + JSON.stringify({error: err.message}));
+        res.end(']');
+    } finally {
+        if (page.context()) await page.context().close();
     }
 }
 module.exports = {
