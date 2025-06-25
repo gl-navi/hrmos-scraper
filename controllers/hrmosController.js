@@ -10,7 +10,7 @@ async function login(browserState, secrets) {
 
     const browser = await browserState.ensureBrowser();
     const context = await browser.newContext();
-    const page = await context.newPage();
+    const page = await browser.newPage();
     await page.goto(LOGIN_URL, { waitUntil: 'networkidle' });
     await page.fill('input[name="email"]', email);
     await page.fill('input[name="password"]', password);
@@ -23,7 +23,7 @@ async function login(browserState, secrets) {
 
 async function fetchCompanies(page) {
     await page.goto(CORP_TOP, { waitUntil: 'networkidle' });
-    await page.waitForSelector('a[href*="/jobs"]', { timeout: 10000 }); // ← 描写完了待機
+    await page.waitForSelector('a[href*="/jobs"]', { timeout: 10000 });
     return await page.$$eval('a[href*="/jobs"]', els => {
         const seen = new Set();
         return els.map(a => {
@@ -38,7 +38,7 @@ async function fetchCompanies(page) {
 
 async function fetchJobItems(page, companyJobsUrl) {
     await page.goto(companyJobsUrl, { waitUntil: 'networkidle' });
-    await page.waitForSelector('a[href*="/jobs/"]', { timeout: 10000 }); // ← 描写完了待機
+    await page.waitForSelector('a[href*="/jobs/"]', { timeout: 10000 });
     return await page.$$eval('a[href*="/jobs/"]', (els, LOCAL_WORDS) => {
         const items = [];
         for (const a of els) {
@@ -59,13 +59,13 @@ async function fetchJobItems(page, companyJobsUrl) {
 
 async function fetchDetailUrls(page, jobUrl) {
     await page.goto(jobUrl, { waitUntil: 'networkidle' });
-    await page.waitForSelector('a[href*="/detail"]', { timeout: 10000 }); // ← 描写完了待機
+    await page.waitForSelector('a[href*="/detail"]', { timeout: 10000 });
     return await page.$$eval('a[href*="/detail"]', els => Array.from(new Set(els.map(a => a.href))));
 }
 
 async function scrapeDetail(page, detailUrl) {
     await page.goto(detailUrl, { waitUntil: 'networkidle' });
-    await page.waitForSelector('img[src*="res.hrmcs.co"], h1,h2,dt', { timeout: 15000 }); // ← 最終描写待ち
+    await page.waitForSelector('img[src*="res.hrmcs.co"], h1,h2,dt', { timeout: 15000 });
 
     return await page.evaluate((detailUrl) => {
         function getFormattedText(el) {
@@ -149,8 +149,9 @@ async function scrapeDetail(page, detailUrl) {
     }, detailUrl);
 }
 
-async function processScrape({page, res, url, stopAt, fetchCompanies, fetchJobItems, fetchDetailUrls, scrapeDetail}) {
-    res.writeHead(200, {'Content-Type': 'application/json; charset=utf-8', 'Transfer-Encoding': 'chunked'});
+// ✅ 修正：依存関数を引数で受け取らず、このスコープ内の関数をそのまま使う
+async function processScrape({ page, res, url, stopAt }) {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Transfer-Encoding': 'chunked' });
     res.write('[');
     let first = true;
     const writeObj = obj => {
@@ -187,10 +188,10 @@ async function processScrape({page, res, url, stopAt, fetchCompanies, fetchJobIt
         }
 
         const flatJobs = [];
-        for (const {companyName, companyJobsUrl} of target) {
+        for (const { companyName, companyJobsUrl } of target) {
             const jobs = await fetchJobItems(page, companyJobsUrl);
             for (const j of jobs) {
-                const row = {companyName, title: j.title, url: j.url};
+                const row = { companyName, title: j.title, url: j.url };
                 flatJobs.push(row);
                 if (stopAt === 'jobs') writeObj(row);
             }
@@ -205,20 +206,21 @@ async function processScrape({page, res, url, stopAt, fetchCompanies, fetchJobIt
             const dUrls = await fetchDetailUrls(page, j.url);
             for (const dUrl of dUrls) {
                 const dInfo = await scrapeDetail(page, dUrl);
-                const {companyName: _, ...rest} = dInfo;
-                writeObj({...j, ...rest});
+                const { companyName: _, ...rest } = dInfo;
+                writeObj({ ...j, ...rest });
             }
         }
 
         res.end(']');
     } catch (err) {
         console.error(err);
-        res.write((first ? '' : ',') + JSON.stringify({error: err.message}));
+        res.write((first ? '' : ',') + JSON.stringify({ error: err.message }));
         res.end(']');
     } finally {
         if (page.context()) await page.context().close();
     }
 }
+
 module.exports = {
     login,
     fetchCompanies,
