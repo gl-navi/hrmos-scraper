@@ -36,3 +36,5 @@ playwright-traces
 
 # Any other local files you don’t want in your image
 *.log
+
+server.js

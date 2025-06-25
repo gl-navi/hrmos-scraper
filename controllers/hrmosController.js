@@ -5,24 +5,25 @@ const CORP_TOP = 'https://hrmos.co/agent/corporates';
 const LOCAL_WORDS = ['名古屋', '愛知', '北海道', '沖縄', '福岡', '広島'];
 
 async function login(browserState, secrets) {
-    const {email, password} = secrets;
+    const { email, password } = secrets;
     if (!email || !password) throw new Error('email/passwordが指定されていません');
 
     const browser = await browserState.ensureBrowser();
     const context = await browser.newContext();
     const page = await context.newPage();
-    await page.goto(LOGIN_URL, {waitUntil: 'networkidle'});
+    await page.goto(LOGIN_URL, { waitUntil: 'networkidle' });
     await page.fill('input[name="email"]', email);
     await page.fill('input[name="password"]', password);
     await Promise.all([
         page.click('button[type="submit"]'),
-        page.waitForURL(CORP_TOP, {timeout: 150000}),
+        page.waitForURL(CORP_TOP, { timeout: 150000 }),
     ]);
-    return {page, context};
+    return { page, context };
 }
 
 async function fetchCompanies(page) {
-    await page.goto(CORP_TOP, {waitUntil: 'networkidle'});
+    await page.goto(CORP_TOP, { waitUntil: 'networkidle' });
+    await page.waitForSelector('a[href*="/jobs"]', { timeout: 10000 }); // ← 描写完了待機
     return await page.$$eval('a[href*="/jobs"]', els => {
         const seen = new Set();
         return els.map(a => {
@@ -30,13 +31,14 @@ async function fetchCompanies(page) {
             if (seen.has(href)) return null;
             seen.add(href);
             const raw = (a.querySelector('.normal')?.innerText || a.textContent).trim();
-            return {companyName: raw.split(/Invited/i)[0].trim(), companyJobsUrl: href};
+            return { companyName: raw.split(/Invited/i)[0].trim(), companyJobsUrl: href };
         }).filter(Boolean);
     });
 }
 
 async function fetchJobItems(page, companyJobsUrl) {
-    await page.goto(companyJobsUrl, {waitUntil: 'networkidle'});
+    await page.goto(companyJobsUrl, { waitUntil: 'networkidle' });
+    await page.waitForSelector('a[href*="/jobs/"]', { timeout: 10000 }); // ← 描写完了待機
     return await page.$$eval('a[href*="/jobs/"]', (els, LOCAL_WORDS) => {
         const items = [];
         for (const a of els) {
@@ -44,7 +46,7 @@ async function fetchJobItems(page, companyJobsUrl) {
             const t = raw.replace(/@\{[^}]+\}/g, '').split(/Invited/i)[0].trim();
             if (!t) continue;
             if (t.includes('組み込み') || LOCAL_WORDS.some(l => t.includes(l))) continue;
-            items.push({title: t, url: a.href});
+            items.push({ title: t, url: a.href });
         }
         const seen = new Set();
         return items.filter(i => {
@@ -56,13 +58,14 @@ async function fetchJobItems(page, companyJobsUrl) {
 }
 
 async function fetchDetailUrls(page, jobUrl) {
-    await page.goto(jobUrl, {waitUntil: 'networkidle'});
+    await page.goto(jobUrl, { waitUntil: 'networkidle' });
+    await page.waitForSelector('a[href*="/detail"]', { timeout: 10000 }); // ← 描写完了待機
     return await page.$$eval('a[href*="/detail"]', els => Array.from(new Set(els.map(a => a.href))));
 }
 
 async function scrapeDetail(page, detailUrl) {
-    await page.goto(detailUrl, {waitUntil: 'networkidle'});
-    await page.waitForSelector('h1,h2,dt', {timeout: 8000});
+    await page.goto(detailUrl, { waitUntil: 'networkidle' });
+    await page.waitForSelector('img[src*="res.hrmcs.co"], h1,h2,dt', { timeout: 15000 }); // ← 最終描写待ち
 
     return await page.evaluate((detailUrl) => {
         function getFormattedText(el) {
@@ -146,82 +149,53 @@ async function scrapeDetail(page, detailUrl) {
     }, detailUrl);
 }
 
-async function processScrape({page, res, url, stopAt, fetchCompanies, fetchJobItems, fetchDetailUrls, scrapeDetail}) {
-    res.writeHead(200, {'Content-Type': 'application/json; charset=utf-8', 'Transfer-Encoding': 'chunked'});
-    res.write('[');
-    let first = true;
-    const writeObj = obj => {
-        res.write((first ? '' : ',') + JSON.stringify(obj));
-        first = false;
-    };
-
+async function processScrape({ page, res, url, stopAt, fetchCompanies, fetchJobItems, fetchDetailUrls, scrapeDetail }) {
     try {
-        if (url.includes('/detail') && stopAt === 'details') {
-            writeObj(await scrapeDetail(page, url));
-            res.end(']');
-            return;
-        }
-
-        const companies = await fetchCompanies(page);
         if (stopAt === 'companies') {
-            companies.forEach(writeObj);
-            res.end(']');
-            return;
-        }
-
-        const target = (() => {
-            if (url.includes('/corporates') && !url.includes('/jobs')) return companies;
-            if (url.includes('/jobs/') && !url.includes('/detail')) {
-                const match = companies.find(c => c.companyJobsUrl === url);
-                return match ? [match] : [];
-            }
-            return null;
-        })();
-
-        if (!target || !target.length) {
-            res.end(']');
-            return;
-        }
-
-        const flatJobs = [];
-        for (const {companyName, companyJobsUrl} of target) {
-            const jobs = await fetchJobItems(page, companyJobsUrl);
-            for (const j of jobs) {
-                const row = {companyName, title: j.title, url: j.url};
-                flatJobs.push(row);
-                if (stopAt === 'jobs') writeObj(row);
-            }
+            const companies = await fetchCompanies(page);
+            return res.json({ companies });
         }
 
         if (stopAt === 'jobs') {
-            res.end(']');
-            return;
-        }
+            const companies = await fetchCompanies(page);
+            const jobResults = [];
 
-        for (const j of flatJobs) {
-            const dUrls = await fetchDetailUrls(page, j.url);
-            for (const dUrl of dUrls) {
-                const dInfo = await scrapeDetail(page, dUrl);
-                const {companyName: _, ...rest} = dInfo;
-                writeObj({...j, ...rest});
+            for (const company of companies) {
+                const jobs = await fetchJobItems(page, company.companyJobsUrl);
+                jobResults.push({ company: company.companyName, jobs });
             }
+
+            return res.json({ jobs: jobResults });
         }
 
-        res.end(']');
-    } catch (err) {
-        console.error(err);
-        res.write((first ? '' : ',') + JSON.stringify({error: err.message}));
-        res.end(']');
-    } finally {
-        if (page.context()) await page.context().close();
+        if (stopAt === 'details') {
+            const companies = await fetchCompanies(page);
+            const allDetails = [];
+
+            for (const company of companies) {
+                const jobs = await fetchJobItems(page, company.companyJobsUrl);
+                for (const job of jobs) {
+                    const detailUrls = await fetchDetailUrls(page, job.url);
+                    for (const detailUrl of detailUrls) {
+                        const detail = await scrapeDetail(page, detailUrl);
+                        allDetails.push(detail);
+                    }
+                }
+            }
+
+            return res.json({ details: allDetails });
+        }
+
+    } catch (error) {
+        console.error('Error during scraping:', error);
+        return res.status(500).json({ error: error.message });
     }
 }
-
 module.exports = {
     login,
     fetchCompanies,
     fetchJobItems,
     fetchDetailUrls,
     scrapeDetail,
-    processScrape
+    processScrape,
 };
