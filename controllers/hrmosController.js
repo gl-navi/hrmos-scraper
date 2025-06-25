@@ -22,15 +22,28 @@ async function login(browserState, secrets) {
     ]);
 
     await page.waitForLoadState('load');
-    await page.waitForTimeout(1000);
-
     return { page, context };
+}
+
+async function waitForDOMStability(page, delayMs = 1200) {
+    await page.evaluate(async (delay) => {
+        return await new Promise((resolve) => {
+            let timeout;
+            const observer = new MutationObserver(() => {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => {
+                    observer.disconnect();
+                    resolve();
+                }, delay);
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
+        });
+    }, delayMs);
 }
 
 async function fetchCompanies(page) {
     await page.goto(CORP_TOP, { waitUntil: 'load' });
-    await page.waitForSelector('a[href*="/jobs"]', { timeout: 15000 });
-    await page.waitForTimeout(1000);
+    await waitForDOMStability(page);
 
     return await page.$$eval('a[href*="/jobs"]', els => {
         const seen = new Set();
@@ -46,8 +59,7 @@ async function fetchCompanies(page) {
 
 async function fetchJobItems(page, companyJobsUrl) {
     await page.goto(companyJobsUrl, { waitUntil: 'load' });
-    await page.waitForSelector('a[href*="/jobs/"]', { timeout: 15000 });
-    await page.waitForTimeout(1000);
+    await waitForDOMStability(page);
 
     return await page.$$eval('a[href*="/jobs/"]', (els, LOCAL_WORDS) => {
         const items = [];
@@ -69,16 +81,21 @@ async function fetchJobItems(page, companyJobsUrl) {
 
 async function fetchDetailUrls(page, jobUrl) {
     await page.goto(jobUrl, { waitUntil: 'load' });
-    await page.waitForSelector('a[href*="/detail"]', { timeout: 15000 });
-    await page.waitForTimeout(1000);
+    await waitForDOMStability(page);
 
     return await page.$$eval('a[href*="/detail"]', els => Array.from(new Set(els.map(a => a.href))));
 }
 
 async function scrapeDetail(page, detailUrl) {
     await page.goto(detailUrl, { waitUntil: 'load' });
-    await page.waitForSelector('img[src*="res.hrmcs.co"], h1,h2,dt', { timeout: 20000 });
-    await page.waitForTimeout(1000);
+    await waitForDOMStability(page);
+
+    // 追加：pre や img が描画されるまで待つ
+    await Promise.all([
+        page.waitForSelector('pre', { timeout: 15000 }),
+    ]);
+
+    await page.waitForSelector('h1,h2,dt', { timeout: 15000 });
 
     return await page.evaluate((detailUrl) => {
         function getFormattedText(el) {
@@ -240,4 +257,5 @@ module.exports = {
     fetchDetailUrls,
     scrapeDetail,
     processScrape,
+    waitForDOMStability
 };

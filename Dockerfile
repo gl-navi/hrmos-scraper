@@ -1,4 +1,4 @@
-FROM node:18-slim
+FROM node:20-slim
 WORKDIR /app
 
 # Playwright 依存ライブラリ
@@ -10,7 +10,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
-RUN npm ci
+RUN npm install
 
 # Playwright ブラウザバイナリのインストール
 RUN npx playwright install --with-deps
