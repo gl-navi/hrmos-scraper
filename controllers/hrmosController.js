@@ -1,5 +1,3 @@
-// controllers/hrmosController.js
-
 const LOGIN_URL = 'https://hrmos.co/agent/login';
 const CORP_TOP = 'https://hrmos.co/agent/corporates';
 const LOCAL_WORDS = ['名古屋', '愛知', '北海道', '沖縄', '福岡', '広島'];
@@ -10,20 +8,30 @@ async function login(browserState, secrets) {
 
     const browser = await browserState.ensureBrowser();
     const context = await browser.newContext();
-    const page = await browser.newPage();
-    await page.goto(LOGIN_URL, { waitUntil: 'networkidle' });
+    const page = await context.newPage();
+    page.setDefaultTimeout(20000);
+
+    await page.goto(LOGIN_URL, { waitUntil: 'load' });
+    await page.waitForSelector('input[name="email"]');
     await page.fill('input[name="email"]', email);
     await page.fill('input[name="password"]', password);
+
     await Promise.all([
         page.click('button[type="submit"]'),
-        page.waitForURL(CORP_TOP, { timeout: 150000 }),
+        page.waitForURL(CORP_TOP, { timeout: 30000 }),
     ]);
+
+    await page.waitForLoadState('load');
+    await page.waitForTimeout(1000);
+
     return { page, context };
 }
 
 async function fetchCompanies(page) {
-    await page.goto(CORP_TOP, { waitUntil: 'networkidle' });
-    await page.waitForSelector('a[href*="/jobs"]', { timeout: 10000 });
+    await page.goto(CORP_TOP, { waitUntil: 'load' });
+    await page.waitForSelector('a[href*="/jobs"]', { timeout: 15000 });
+    await page.waitForTimeout(1000);
+
     return await page.$$eval('a[href*="/jobs"]', els => {
         const seen = new Set();
         return els.map(a => {
@@ -37,8 +45,10 @@ async function fetchCompanies(page) {
 }
 
 async function fetchJobItems(page, companyJobsUrl) {
-    await page.goto(companyJobsUrl, { waitUntil: 'networkidle' });
-    await page.waitForSelector('a[href*="/jobs/"]', { timeout: 10000 });
+    await page.goto(companyJobsUrl, { waitUntil: 'load' });
+    await page.waitForSelector('a[href*="/jobs/"]', { timeout: 15000 });
+    await page.waitForTimeout(1000);
+
     return await page.$$eval('a[href*="/jobs/"]', (els, LOCAL_WORDS) => {
         const items = [];
         for (const a of els) {
@@ -58,14 +68,17 @@ async function fetchJobItems(page, companyJobsUrl) {
 }
 
 async function fetchDetailUrls(page, jobUrl) {
-    await page.goto(jobUrl, { waitUntil: 'networkidle' });
-    await page.waitForSelector('a[href*="/detail"]', { timeout: 10000 });
+    await page.goto(jobUrl, { waitUntil: 'load' });
+    await page.waitForSelector('a[href*="/detail"]', { timeout: 15000 });
+    await page.waitForTimeout(1000);
+
     return await page.$$eval('a[href*="/detail"]', els => Array.from(new Set(els.map(a => a.href))));
 }
 
 async function scrapeDetail(page, detailUrl) {
-    await page.goto(detailUrl, { waitUntil: 'networkidle' });
-    await page.waitForSelector('img[src*="res.hrmcs.co"], h1,h2,dt', { timeout: 15000 });
+    await page.goto(detailUrl, { waitUntil: 'load' });
+    await page.waitForSelector('img[src*="res.hrmcs.co"], h1,h2,dt', { timeout: 20000 });
+    await page.waitForTimeout(1000);
 
     return await page.evaluate((detailUrl) => {
         function getFormattedText(el) {
@@ -149,7 +162,6 @@ async function scrapeDetail(page, detailUrl) {
     }, detailUrl);
 }
 
-// ✅ 修正：依存関数を引数で受け取らず、このスコープ内の関数をそのまま使う
 async function processScrape({ page, res, url, stopAt }) {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Transfer-Encoding': 'chunked' });
     res.write('[');
