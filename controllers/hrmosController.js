@@ -148,6 +148,20 @@ async function scrapeDetail(page, detailUrl) {
             const match = posting.match(regex);
             return match ? match[1].trim() : '';
         };
+            // ✅ バイト数に基づいてトリミングする関数をここに追加
+        const truncateUTF8 = (str, maxBytes) => {
+            let bytes = 0;
+            let result = '';
+            for (const char of str) {
+                const code = char.codePointAt(0);
+                bytes += code <= 0x7F ? 1 :
+                        code <= 0x7FF ? 2 :
+                        code <= 0xFFFF ? 3 : 4;
+                if (bytes > maxBytes) break;
+                result += char;
+            }
+            return result;
+        };
 
         /* ---------- 大きなブロック抽出 ---------- */
         let postingDetails = '';
@@ -224,7 +238,7 @@ async function scrapeDetail(page, detailUrl) {
         return {
             companyName,
             detailUrl,
-            JPS_applied_job_title: (extractByLabels(LABELS.jobTitle) || '').slice(0, 80),
+            JPS_applied_job_title: truncateUTF8(extractByLabels(LABELS.jobTitle) || '', 79),
             JPS_occupation_category: extractByLabels(LABELS.occupation),
             JPS_position_department: '',
             JPS_overseas_residency_check: '',
