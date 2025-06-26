@@ -160,13 +160,35 @@ async function scrapeDetail(page, detailUrl) {
                 postingDetails = getFormattedText(bodyBlocks.sort((a, b) => b.innerText.length - a.innerText.length)[0]);
             }
         }
+        /* ---------- 汎用セクション抽出 ---------- */
+        function pickSectionText(labelRegex) {
+          // A. <th> or <dt> 形式  ------------------------------------
+          for (const th of document.querySelectorAll('th,dt')) {
+            if (labelRegex.test(th.innerText)) {
+              const cell = th.nextElementSibling || th.parentElement.querySelector('td,dd,pre');
+              if (cell) return getFormattedText(cell);
+            }
+          }
 
+          // B. 見出し + ブロック形式  --------------------------------
+          for (const h of document.querySelectorAll('h1,h2,h3,strong,b')) {
+            if (labelRegex.test((h.innerText || '').trim())) {
+              const parts = [];
+              let cur = h.nextElementSibling;
+              while (cur) {
+                if (/^h[1-3]$/i.test(cur.tagName)) break;          // 次の見出しが来たら終了
+                if ((cur.innerText || '').trim().length) parts.push(getFormattedText(cur));
+                cur = cur.nextElementSibling;
+              }
+              if (parts.length) return parts.join('\n').trim();
+            }
+          }
+          return ''; // 見つからなければ空
+        }
         /* ---------- 特定ブロック抽出 ---------- */
-        const recruitmentDetails = extractByLabels(
-            ['応募資格', '必須', '必須（MUST）', 'Required', 'MUST'], true);
-        const idealProfile = extractByLabels(
-            ['求める人物像', '歓迎', 'WANT', 'Ideal', 'Desired'], true);
-
+        const recruitmentDetails = pickSectionText(/必須|MUST|Required/i);   // ← MUST 専用
+        const idealProfile       = pickSectionText(/歓迎|WANT|Desired|Ideal/i); // ← WANT 専用
+        
         /* ---------- UI 言語判定 ---------- */
         const isEnglishUI = /Employment Type|Annual income|Job Title|Location/i.test(postingDetails);
 
@@ -218,7 +240,6 @@ async function scrapeDetail(page, detailUrl) {
             JPS_trial_period_others: '',
             JPS_recruitment_details: recruitmentDetails,
             JPS_ideal_candidate_profile: idealProfile,
-            JPS_smoking_policy: extractByLabels(LABELS.smoking),
             JPS_posting_details: postingDetails
         };
     }, detailUrl);
