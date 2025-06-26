@@ -187,7 +187,7 @@ async function scrapeDetail(page, detailUrl) {
                               .trim();
           };
 
-          const heads = document.querySelectorAll('h1,h2,h3,strong,b,p,em');
+          const heads = document.querySelectorAll('h1,h2,h3,strong,b,p,em,blockquote');
           for (const h of heads) {
             const txt = (h.innerText || '').trim();
             if (!labelRegex.test(txt)) continue;
@@ -197,7 +197,7 @@ async function scrapeDetail(page, detailUrl) {
             while (cur) {
               // 終了条件
               if (cur.matches('h1') ||
-                  (!allowSub && cur.matches('h2,h3,strong,b,p,em'))) break;
+                  (!allowSub && cur.matches('h2,h3,strong,b,p,em,blockquote'))) break;
               if ((cur.innerText || '').trim().length) buf.push(getFormattedText(cur));
               cur = cur.nextElementSibling;
             }
@@ -206,17 +206,19 @@ async function scrapeDetail(page, detailUrl) {
           return '';
         }
 
-        /* ---------- 特定ブロック抽出 ---------- */
-        // ① 普通の「歓迎（WANT）」見出しを取りに行く
-        let idealProfile = pickSectionText(/歓迎(\（WANT）)?|WANT|Ideal|Desired/i);
+        /* ---------- MUST / WANT 抽出 ---------- */
 
-        // ② 取れなければ「歓迎する経歴 / 経験」ブロックごと取得（h1 まで）
-        if (!idealProfile) {
-          idealProfile = pickSectionText(/歓迎する経歴|歓迎する経験/i, true);
-        }
+        // --- MUST ---
+        let recruitmentDetails =
+              pickSectionText(/応募資格.*MUST|必須|MUST|Required/i)   // ① 通常モード
+          || pickSectionText(/応募資格.*MUST|必須|MUST|Required/i, true); // ② サブ許可（<p>等も拾う）
 
-        // MUST は従来どおり
-        const recruitmentDetails = pickSectionText(/必須|MUST|Required/i);
+        // --- WANT ---
+        let idealProfile =
+              pickSectionText(/応募資格.*WANT|歓迎(\（WANT）)?|WANT|Ideal|Desired/i)        // ① 通常モード
+          || pickSectionText(/応募資格.*WANT|歓迎(\（WANT）)?|WANT|Ideal|Desired/i, true) // ② サブ許可
+          || pickSectionText(/歓迎する経歴|歓迎する経験|応募していただきたい方/i, true);   // ③ フォールバック
+
 
 
         /* ---------- UI 言語判定 ---------- */
