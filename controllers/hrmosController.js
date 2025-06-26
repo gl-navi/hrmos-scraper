@@ -175,33 +175,49 @@ async function scrapeDetail(page, detailUrl) {
             }
         }
         /* ---------- 汎用セクション抽出 ---------- */
-        function pickSectionText(labelRegex) {
-          // A. <th> or <dt> 形式  ------------------------------------
-          for (const th of document.querySelectorAll('th,dt')) {
-            if (labelRegex.test(th.innerText)) {
-              const cell = th.nextElementSibling || th.parentElement.querySelector('td,dd,pre');
-              if (cell) return getFormattedText(cell);
-            }
-          }
+        function pickSectionText(labelRegex, allowSub = false) {
+          const getFormattedText = (el) => {
+            const c = el.cloneNode(true);
+            c.querySelectorAll('img,picture,svg').forEach(n => n.remove());
+            c.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
+            c.querySelectorAll('li').forEach(li => li.insertAdjacentText('afterbegin', '• '));
+            return c.innerText.replace(/\r?\n/g, ' ')
+                              .replace(/\\n/g, ' ')
+                              .replace(/\s{2,}/g, ' ')
+                              .trim();
+          };
 
-          // B. 見出し + ブロック形式  --------------------------------
-          for (const h of document.querySelectorAll('h1,h2,h3,strong,b')) {
-            if (labelRegex.test((h.innerText || '').trim())) {
-              const parts = [];
-              let cur = h.nextElementSibling;
-              while (cur) {
-                if (/^h[1-3]$/i.test(cur.tagName)) break;          // 次の見出しが来たら終了
-                if ((cur.innerText || '').trim().length) parts.push(getFormattedText(cur));
-                cur = cur.nextElementSibling;
-              }
-              if (parts.length) return parts.join('\n').trim();
+          const heads = document.querySelectorAll('h1,h2,h3,strong,b,p,em');
+          for (const h of heads) {
+            const txt = (h.innerText || '').trim();
+            if (!labelRegex.test(txt)) continue;
+
+            const buf = [];
+            let cur = h.nextElementSibling;
+            while (cur) {
+              // 終了条件
+              if (cur.matches('h1') ||
+                  (!allowSub && cur.matches('h2,h3,strong,b,p,em'))) break;
+              if ((cur.innerText || '').trim().length) buf.push(getFormattedText(cur));
+              cur = cur.nextElementSibling;
             }
+            if (buf.length) return buf.join('\n').trim();
           }
-          return ''; // 見つからなければ空
+          return '';
         }
+
         /* ---------- 特定ブロック抽出 ---------- */
-        const recruitmentDetails = pickSectionText(/必須|MUST|Required/i);   // ← MUST 専用
-        const idealProfile       = pickSectionText(/歓迎|WANT|Desired|Ideal/i); // ← WANT 専用
+        // ① 普通の「歓迎（WANT）」見出しを取りに行く
+        let idealProfile = pickSectionText(/歓迎(\（WANT）)?|WANT|Ideal|Desired/i);
+
+        // ② 取れなければ「歓迎する経歴 / 経験」ブロックごと取得（h1 まで）
+        if (!idealProfile) {
+          idealProfile = pickSectionText(/歓迎する経歴|歓迎する経験/i, true);
+        }
+
+        // MUST は従来どおり
+        const recruitmentDetails = pickSectionText(/必須|MUST|Required/i);
+
 
         /* ---------- UI 言語判定 ---------- */
         const isEnglishUI = /Employment Type|Annual income|Job Title|Location/i.test(postingDetails);
@@ -228,11 +244,6 @@ async function scrapeDetail(page, detailUrl) {
         const companyName = extractByLabels(['会社名', 'Company Name']) ||
                             extractFromPostingDetails(postingDetails, isEnglishUI ? 'Company Name' : '会社名');
 
-        const workCondKeysJP  = ['固定時間制', '変動勤務時間制', 'フレックスタイム制', '裁量勤務制'];
-        const workCondKeysEN  = ['Fixed', 'Shift', 'Flex', 'Discretionary'];
-        const workCondKeys    = workCondKeysJP.concat(workCondKeysEN);
-        const workingCondMatch = workCondKeys.find(k =>
-            salaryBlock.includes(k) || workTimeBlock.includes(k)) || '';
 
         /* ---------- 結果オブジェクト ---------- */
         return {
