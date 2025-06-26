@@ -241,6 +241,12 @@ async function scrapeDetail(page, detailUrl) {
         const workTimeBlock = extractByLabels(LABELS.workSchedule, true) ||
                               extractFromPostingDetails(postingDetails, isEnglishUI ? 'Working hours' : '勤務時間');
 
+        const wcKeywords = ['フレック', 'フレックス', 'フレックスタイム',   'Fixed', 'Flex', 'Flextime', 'Shift', 'Discretionary'];
+        const hasWorkingCond = wcKeywords.some(k =>
+          workTimeBlock.toLowerCase().includes(k.toLowerCase())
+        );
+        const workingCondMatch = hasWorkingCond ? workTimeBlock : '';
+
         const companyName = extractByLabels(['会社名', 'Company Name']) ||
                             extractFromPostingDetails(postingDetails, isEnglishUI ? 'Company Name' : '会社名');
 
