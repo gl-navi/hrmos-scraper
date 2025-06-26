@@ -1,7 +1,7 @@
 FROM node:20-slim
 WORKDIR /app
 
-# Playwright 依存ライブラリ
+# 必要な依存ライブラリをインストール（Playwright 実行に必要）
 RUN apt-get update && \
     apt-get install -y \
       libnss3 libatk-bridge2.0-0 libx11-xcb1 libxcomposite1 \
@@ -12,12 +12,14 @@ RUN apt-get update && \
 COPY package*.json ./
 RUN npm install
 
-# Playwright ブラウザバイナリのインストール
 RUN npx playwright install --with-deps
 
-COPY . .
+COPY main.js ./
+COPY routes/ ./routes/
+COPY utils/ ./utils/
+COPY controllers/ ./controllers/
 
 EXPOSE 3000
-
 ENV PORT=3000
+
 CMD ["node", "main.js"]

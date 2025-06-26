@@ -1,13 +1,25 @@
-const LOGIN_URL = 'https://hrmos.co/agent/login';
-const CORP_TOP = 'https://hrmos.co/agent/corporates';
+// hrmos.js  ★英語 UI 対応版 2025-06-25
+const LOGIN_URL  = 'https://hrmos.co/agent/login';
+const CORP_TOP   = 'https://hrmos.co/agent/corporates';
 const LOCAL_WORDS = ['名古屋', '愛知', '北海道', '沖縄', '福岡', '広島'];
 
+/* ========== 1. ログイン ========== */
 async function login(browserState, secrets) {
     const { email, password } = secrets;
-    if (!email || !password) throw new Error('email/passwordが指定されていません');
+    if (!email || !password) throw new Error('email/password が指定されていません');
 
     const browser = await browserState.ensureBrowser();
-    const context = await browser.newContext();
+    /* 👇 英語 UI でも日本語 UI でも動くよう locale + stealth */
+    const context = await browser.newContext({
+        locale: 'ja-JP',
+        userAgent:
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+          '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+    });
+    await context.addInitScript(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    });
+
     const page = await context.newPage();
     page.setDefaultTimeout(20000);
 
@@ -25,7 +37,8 @@ async function login(browserState, secrets) {
     return { page, context };
 }
 
-async function waitForDOMStability(page, delayMs = 1200) {
+/* ========== 2. DOM 安定待ち ========== */
+async function waitForDOMStability(page, delayMs = 1500) {
     await page.evaluate(async (delay) => {
         return await new Promise((resolve) => {
             let timeout;
@@ -41,6 +54,7 @@ async function waitForDOMStability(page, delayMs = 1200) {
     }, delayMs);
 }
 
+/* ========== 3. 企業一覧取得 ========== */
 async function fetchCompanies(page) {
     await page.goto(CORP_TOP, { waitUntil: 'load' });
     await waitForDOMStability(page);
@@ -57,6 +71,7 @@ async function fetchCompanies(page) {
     });
 }
 
+/* ========== 4. 求人リスト取得 ========== */
 async function fetchJobItems(page, companyJobsUrl) {
     await page.goto(companyJobsUrl, { waitUntil: 'load' });
     await waitForDOMStability(page);
@@ -79,6 +94,7 @@ async function fetchJobItems(page, companyJobsUrl) {
     }, LOCAL_WORDS);
 }
 
+/* ========== 5. 詳細ページ URL 取得 ========== */
 async function fetchDetailUrls(page, jobUrl) {
     await page.goto(jobUrl, { waitUntil: 'load' });
     await waitForDOMStability(page);
@@ -86,28 +102,28 @@ async function fetchDetailUrls(page, jobUrl) {
     return await page.$$eval('a[href*="/detail"]', els => Array.from(new Set(els.map(a => a.href))));
 }
 
+/* ========== 6. 詳細スクレイピング ========== */
 async function scrapeDetail(page, detailUrl) {
     await page.goto(detailUrl, { waitUntil: 'load' });
     await waitForDOMStability(page);
 
-    // 追加：pre や img が描画されるまで待つ
     await Promise.all([
         page.waitForSelector('pre', { timeout: 15000 }),
     ]);
-
-    await page.waitForSelector('h1,h2,dt', { timeout: 15000 });
+    await page.waitForSelector('h1,h2,dt,th', { timeout: 15000 });
 
     return await page.evaluate((detailUrl) => {
-        function getFormattedText(el) {
+        /* ---------- 共通ユーティリティ ---------- */
+        const getFormattedText = (el) => {
             const clone = el.cloneNode(true);
             clone.querySelectorAll('img,picture,svg').forEach(n => n.remove());
             clone.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
             clone.querySelectorAll('li').forEach(li => li.insertAdjacentText('afterbegin', '• '));
-            return clone.innerText.replace(/\n{3,}/g, '\n\n').trim();
-        }
+            return clone.innerText.replace(/\r?\n/g, ' ').replace(/\\n/g, ' ').replace(/\s{2,}/g, ' ').trim();
+        };
 
-        function extractByLabels(labels, joinAll = false) {
-            const isMatch = txt => labels.some(l => txt && txt.trim().includes(l));
+        const extractByLabels = (labels, joinAll = false) => {
+            const isMatch = txt => labels.some(l => txt && txt.trim().toLowerCase().includes(l.toLowerCase()));
             const results = [];
 
             for (const el of document.querySelectorAll('th,dt')) {
@@ -116,7 +132,6 @@ async function scrapeDetail(page, detailUrl) {
                     if (val) results.push(getFormattedText(val));
                 }
             }
-
             for (const h of document.querySelectorAll('h1,h2,h3,strong,b')) {
                 if (isMatch(h.innerText)) {
                     let n = h.nextElementSibling;
@@ -124,49 +139,78 @@ async function scrapeDetail(page, detailUrl) {
                     if (n) results.push(getFormattedText(n));
                 }
             }
-
             return joinAll ? results.join('\n') : (results[0] || '');
-        }
+        };
 
+        /* posting_details からのラベル補完 */
+        const extractFromPostingDetails = (posting, label) => {
+            const regex = new RegExp(`${label}\\s*[:：]?\\s*(.+)`, 'i');
+            const match = posting.match(regex);
+            return match ? match[1].trim() : '';
+        };
+
+        /* ---------- 大きなブロック抽出 ---------- */
         let postingDetails = '';
         const tbodies = Array.from(document.querySelectorAll('tbody')).map(tb => getFormattedText(tb)).filter(t => t.length);
         if (tbodies.length) postingDetails = tbodies.join('\n\n');
         else {
-            const bodyBlocks = Array.from(document.querySelectorAll('section, div, article')).filter(e => (e.innerText || '').length > 200);
-            if (bodyBlocks.length) postingDetails = getFormattedText(bodyBlocks.sort((a, b) => b.innerText.length - a.innerText.length)[0]);
-        }
-
-        let recruitmentDetails = '';
-        const heading = Array.from(document.querySelectorAll('h1,h2,h3,strong,b')).find(h => /応募資格/.test(h.innerText));
-        if (heading) {
-            const parts = [];
-            const stopTags = new Set(['H1', 'H2', 'H3', 'STRONG', 'B']);
-            let n = heading.nextElementSibling;
-            while (n && !stopTags.has(n.tagName)) {
-                if ((n.innerText || '').trim()) parts.push(getFormattedText(n));
-                n = n.nextElementSibling;
+            const bodyBlocks = Array.from(document.querySelectorAll('section, div, article'))
+                .filter(e => (e.innerText || '').length > 200);
+            if (bodyBlocks.length) {
+                postingDetails = getFormattedText(bodyBlocks.sort((a, b) => b.innerText.length - a.innerText.length)[0]);
             }
-            recruitmentDetails = parts.join('\n');
         }
 
-        const companyName = extractByLabels(['会社名']);
-        const salaryBlock = extractByLabels(['給与', '想定年収'], true);
-        const salaryFirst = salaryBlock.split(/\r?\n/)[0].trim();
-        const workTimeBlock = extractByLabels(['勤務時間', '勤務時間・曜日'], true);
-        const workCondKeys = ['固定時間制', '変動勤務時間制', 'フレックスタイム制', '裁量勤務制'];
-        const workingCondMatch = workCondKeys.find(k => salaryBlock.includes(k) || workTimeBlock.includes(k)) || '';
-        const idealProfile = extractByLabels(['求める人物像', '歓迎する経歴', '応募資格（WANT）'], true);
+        /* ---------- 特定ブロック抽出 ---------- */
+        const recruitmentDetails = extractByLabels(
+            ['応募資格', '必須', '必須（MUST）', 'Required', 'MUST'], true);
+        const idealProfile = extractByLabels(
+            ['求める人物像', '歓迎', 'WANT', 'Ideal', 'Desired'], true);
 
+        /* ---------- UI 言語判定 ---------- */
+        const isEnglishUI = /Employment Type|Annual income|Job Title|Location/i.test(postingDetails);
+
+        /* ---------- ラベルに英語も追加 ---------- */
+        const LABELS = {
+            jobTitle:          ['求人タイトル', 'Job Title'],
+            occupation:        ['職種', '募集ポジション', 'Job Function', 'Position'],
+            contractType:      ['雇用形態', 'Employment Type'],
+            contractPeriod:    ['契約期間', 'Contract Period'],
+            workLocation:      ['勤務地', 'Location'],
+            workSchedule:      ['勤務時間', 'Working hours'],
+            salary:            ['給与', '想定年収', 'Salary', 'Annual income'],
+            smoking:           ['受動喫煙対策', 'Second-hand smoke'],
+        };
+
+        /* ---------- 個別項目 ---------- */
+        const salaryBlock = extractByLabels(LABELS.salary, true) ||
+                            extractFromPostingDetails(postingDetails, isEnglishUI ? 'Salary' : '給与');
+        const salaryFirst = salaryBlock.split(/\r?\n/)[0].trim();
+
+        const workTimeBlock = extractByLabels(LABELS.workSchedule, true) ||
+                              extractFromPostingDetails(postingDetails, isEnglishUI ? 'Working hours' : '勤務時間');
+
+        const companyName = extractByLabels(['会社名', 'Company Name']) ||
+                            extractFromPostingDetails(postingDetails, isEnglishUI ? 'Company Name' : '会社名');
+
+        const workCondKeysJP  = ['固定時間制', '変動勤務時間制', 'フレックスタイム制', '裁量勤務制'];
+        const workCondKeysEN  = ['Fixed', 'Shift', 'Flex', 'Discretionary'];
+        const workCondKeys    = workCondKeysJP.concat(workCondKeysEN);
+        const workingCondMatch = workCondKeys.find(k =>
+            salaryBlock.includes(k) || workTimeBlock.includes(k)) || '';
+
+        /* ---------- 結果オブジェクト ---------- */
         return {
             companyName,
             detailUrl,
-            JPS_applied_job_title: extractByLabels(['求人タイトル']),
-            JPS_occupation_category: extractByLabels(['職種', '募集ポジション']),
+            JPS_applied_job_title: (extractByLabels(LABELS.jobTitle) || '').slice(0, 80),
+            JPS_occupation_category: extractByLabels(LABELS.occupation),
             JPS_position_department: '',
             JPS_overseas_residency_check: '',
-            JPS_display_language: '日本語',
-            JPS_contract_type: extractByLabels(['雇用形態']),
-            JPS_work_location: extractByLabels(['勤務地']),
+            JPS_display_language: isEnglishUI ? 'English' : '日本語',
+            JPS_contract_type: extractByLabels(LABELS.contractType),
+            JPS_contract_period: extractByLabels(LABELS.contractPeriod),
+            JPS_work_location: extractByLabels(LABELS.workLocation),
             JPS_salary: salaryFirst,
             JPS_working_conditions: workingCondMatch,
             JPS_work_schedule: workTimeBlock,
@@ -174,13 +218,18 @@ async function scrapeDetail(page, detailUrl) {
             JPS_trial_period_others: '',
             JPS_recruitment_details: recruitmentDetails,
             JPS_ideal_candidate_profile: idealProfile,
+            JPS_smoking_policy: extractByLabels(LABELS.smoking),
             JPS_posting_details: postingDetails
         };
     }, detailUrl);
 }
 
+/* ========== 7. 全体ハンドラ ========== */
 async function processScrape({ page, res, url, stopAt }) {
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Transfer-Encoding': 'chunked' });
+    res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Transfer-Encoding': 'chunked'
+    });
     res.write('[');
     let first = true;
     const writeObj = obj => {
@@ -239,7 +288,6 @@ async function processScrape({ page, res, url, stopAt }) {
                 writeObj({ ...j, ...rest });
             }
         }
-
         res.end(']');
     } catch (err) {
         console.error(err);
@@ -250,6 +298,7 @@ async function processScrape({ page, res, url, stopAt }) {
     }
 }
 
+/* ========== 8. エクスポート ========== */
 module.exports = {
     login,
     fetchCompanies,
