@@ -188,7 +188,7 @@ async function scrapeDetail(page, detailUrl) {
         /* ---------- 特定ブロック抽出 ---------- */
         const recruitmentDetails = pickSectionText(/必須|MUST|Required/i);   // ← MUST 専用
         const idealProfile       = pickSectionText(/歓迎|WANT|Desired|Ideal/i); // ← WANT 専用
-        
+
         /* ---------- UI 言語判定 ---------- */
         const isEnglishUI = /Employment Type|Annual income|Job Title|Location/i.test(postingDetails);
 
@@ -201,7 +201,6 @@ async function scrapeDetail(page, detailUrl) {
             workLocation:      ['勤務地', 'Location'],
             workSchedule:      ['勤務時間', 'Working hours'],
             salary:            ['給与', '想定年収', 'Salary', 'Annual income'],
-            smoking:           ['受動喫煙対策', 'Second-hand smoke'],
         };
 
         /* ---------- 個別項目 ---------- */
