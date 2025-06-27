@@ -38,8 +38,6 @@ jobs:
             -t 423623854229.dkr.ecr.ap-northeast-1.amazonaws.com/hrmos_scraper:latest \
             --push .
 
-      # The tagging and pushing steps are not needed anymore because buildx pushes directly
-
       - name: Deploy on EC2
         uses: appleboy/ssh-action@v0.1.9
         with:
@@ -47,20 +45,22 @@ jobs:
           username: ${{ secrets.EC2_SSH_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            # Stop and remove running container if exists
-            if [ $(docker ps -q -f name=hrmos_scraper) ]; then
-              docker stop hrmos_scraper
-              docker rm hrmos_scraper
+            # Stop and remove container if it exists (running or exited)
+            if [ $(docker ps -aq -f name=hrmos_scraper) ]; then
+              docker rm -f hrmos_scraper
             fi
-            
-            # Optional: Remove all docker images to free space (be careful)
+
+            # Optional: Remove all Docker images (clean up disk space)
             docker rmi -f $(docker images -q) || true
-            
+
             # Login to ECR from EC2
             aws ecr get-login-password --region ap-northeast-1 | docker login --username AWS --password-stdin 423623854229.dkr.ecr.ap-northeast-1.amazonaws.com
-            
-            # Pull latest image
+
+            # Pull the latest image from ECR
             docker pull 423623854229.dkr.ecr.ap-northeast-1.amazonaws.com/hrmos_scraper:latest
-            
+
             # Run container
-            docker run -d -p 3000:3000 -e AWS_REGION=ap-northeast-1 --name hrmos_scraper 423623854229.dkr.ecr.ap-northeast-1.amazonaws.com/hrmos_scraper:latest
+            docker run -d -p 3000:3000 \
+              -e AWS_REGION=ap-northeast-1 \
+              --name hrmos_scraper \
+              423623854229.dkr.ecr.ap-northeast-1.amazonaws.com/hrmos_scraper:latest
