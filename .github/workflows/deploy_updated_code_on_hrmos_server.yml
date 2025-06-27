@@ -30,7 +30,7 @@ jobs:
       - name: Build and push Docker image for ARM64
         run: |
           docker buildx build \
-            --platform linux/arm64 \
+            --platform linux/amd64 \
             -t 423623854229.dkr.ecr.ap-northeast-1.amazonaws.com/hrmos_scraper:latest \
             --push .
 
