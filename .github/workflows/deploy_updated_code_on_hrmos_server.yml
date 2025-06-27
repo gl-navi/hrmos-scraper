@@ -27,13 +27,18 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Build and push Docker image for amd64
+      - name: Set up Docker Buildx
         run: |
           docker buildx create --use || true
+
+      - name: Build and push multi-arch Docker image
+        run: |
           docker buildx build \
-            --platform linux/amd64 \
+            --platform linux/amd64,linux/arm64 \
             -t 423623854229.dkr.ecr.ap-northeast-1.amazonaws.com/hrmos_scraper:latest \
             --push .
+
+      # The tagging and pushing steps are not needed anymore because buildx pushes directly
 
       - name: Deploy on EC2
         uses: appleboy/ssh-action@v0.1.9
@@ -47,15 +52,15 @@ jobs:
               docker stop hrmos_scraper
               docker rm hrmos_scraper
             fi
-
-            # Remove all docker images (optional)
+            
+            # Optional: Remove all docker images to free space (be careful)
             docker rmi -f $(docker images -q) || true
-
+            
             # Login to ECR from EC2
             aws ecr get-login-password --region ap-northeast-1 | docker login --username AWS --password-stdin 423623854229.dkr.ecr.ap-northeast-1.amazonaws.com
-
+            
             # Pull latest image
             docker pull 423623854229.dkr.ecr.ap-northeast-1.amazonaws.com/hrmos_scraper:latest
-
+            
             # Run container
             docker run -d -p 3000:3000 -e AWS_REGION=ap-northeast-1 --name hrmos_scraper 423623854229.dkr.ecr.ap-northeast-1.amazonaws.com/hrmos_scraper:latest
