@@ -257,7 +257,7 @@ async function scrapeDetail(page, detailUrl) {
         return {
             companyName,
             detailUrl,
-            JPS_applied_job_title: truncateUTF8(extractByLabels(LABELS.jobTitle) || '', 79),
+            JPS_applied_job_title: extractByLabels(LABELS.jobTitle) || '',
             JPS_occupation_category: extractByLabels(LABELS.occupation),
             JPS_position_department: '',
             JPS_overseas_residency_check: '',
